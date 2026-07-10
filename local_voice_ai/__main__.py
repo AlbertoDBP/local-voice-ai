@@ -18,6 +18,9 @@ import sys
 from pathlib import Path
 
 import uvicorn
+from dotenv import load_dotenv
+
+load_dotenv(".env.local")
 
 from .api import build_app
 from .config import Config

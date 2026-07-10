@@ -29,33 +29,99 @@ logger = logging.getLogger("agent")
 load_dotenv(".env.local")
 
 
+from . import vault_tools
+
+
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=(
-                "You are a helpful voice AI assistant. The user is interacting with you via "
-                "voice, even if you perceive the conversation as text. You eagerly assist "
-                "users with their questions by providing information from your extensive "
-                "knowledge. Your responses are concise, to the point, and without any "
-                "complex formatting or punctuation including emojis, asterisks, or other "
-                "symbols. You are curious, friendly, and have a sense of humor."
+                "You are the voice interface to Alberto's second brain — an Obsidian "
+                "vault holding his businesses (DBP, IMC, Student First, 305 Music Lab, "
+                "Valencia 218), finances, people, and plans. You are speaking out loud: "
+                "keep answers to two or three plain sentences, no formatting, no emojis. "
+                "For ANY question about Alberto, his businesses, finances, people, or "
+                "plans, call brain_query FIRST and answer only from its evidence; say so "
+                "when the evidence is insufficient rather than guessing. "
+                "store_memory and run_command stage a pending action: speak the "
+                "confirmation question they return, and call confirm_pending only after "
+                "the user clearly says yes (cancel_pending on no or on a topic change). "
+                "Call ask_claude only when the user explicitly asks to bring Claude in "
+                "(for example 'ask Claude'); warn them it takes a minute, and summarize "
+                "its reply out loud in your own words."
             ),
         )
 
     @function_tool()
-    async def multiply_numbers(
-        self,
-        context: RunContext,
-        number1: int,
-        number2: int,
-    ) -> dict[str, Any]:
-        """Multiply two numbers.
+    async def brain_query(self, context: RunContext, question: str) -> str:
+        """Retrieve evidence from Alberto's second-brain vault. Use FIRST for any
+        question about Alberto, his businesses, finances, people, or plans.
 
         Args:
-            number1: The first number to multiply.
-            number2: The second number to multiply.
+            question: The question to retrieve vault evidence for.
         """
-        return f"The product of {number1} and {number2} is {number1 * number2}."
+        return vault_tools.brain_query(question)
+
+    @function_tool()
+    async def read_note(self, context: RunContext, path: str) -> str:
+        """Read a markdown note from the vault by its vault-relative path.
+
+        Args:
+            path: Vault-relative path of the note.
+        """
+        return vault_tools.read_note(path)
+
+    @function_tool()
+    async def list_notes(self, context: RunContext, subdir: str = "") -> str:
+        """List markdown notes in the vault, optionally under a subdirectory.
+
+        Args:
+            subdir: Optional vault subdirectory to list.
+        """
+        return vault_tools.list_notes(subdir)
+
+    @function_tool()
+    async def store_memory(self, context: RunContext, text: str) -> str:
+        """Stage saving a new memory to the vault. Returns a confirmation prompt
+        to speak; execute with confirm_pending only after the user says yes.
+
+        Args:
+            text: The memory text to save.
+        """
+        return vault_tools.store_memory(text)
+
+    @function_tool()
+    async def run_command(self, context: RunContext, cmd: str, cwd: str = "") -> str:
+        """Stage an allowlisted shell command (brain, graphify, read-only git, ls,
+        find). Returns a confirmation prompt to speak; execute with
+        confirm_pending only after the user says yes.
+
+        Args:
+            cmd: The command line to run.
+            cwd: Optional working directory.
+        """
+        return vault_tools.run_command(cmd, cwd)
+
+    @function_tool()
+    async def confirm_pending(self, context: RunContext) -> str:
+        """Execute the pending staged action. Call ONLY after the user clearly
+        said yes to the spoken confirmation question."""
+        return vault_tools.confirm_pending()
+
+    @function_tool()
+    async def cancel_pending(self, context: RunContext) -> str:
+        """Cancel the pending staged action (user said no or moved on)."""
+        return vault_tools.cancel_pending()
+
+    @function_tool()
+    async def ask_claude(self, context: RunContext, question: str) -> str:
+        """Escalate one question to Claude (slower, smarter, cloud). Call ONLY
+        when the user explicitly asks to involve Claude.
+
+        Args:
+            question: The question to send to Claude.
+        """
+        return vault_tools.ask_claude(question)
 
 
 server = AgentServer()
@@ -107,10 +173,16 @@ async def my_agent(ctx: JobContext) -> None:
         # body as text, pushes zero frames, and raises "no audio frames were
         # pushed". Kokoro ignores the model field, so "tts-1" is purely a
         # protocol selector here.
-        tts=openai.TTS(base_url=tts_base_url, model="tts-1", voice=tts_voice, api_key=tts_api_key),
+        tts=openai.TTS(base_url=tts_base_url, model="tts-1", voice=tts_voice, api_key=tts_api_key,
+                       speed=float(os.getenv("TTS_SPEED", "1.0"))),
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
+        # Fast turn-taking (env-tunable): since interruption is supported, an
+        # occasional early jump-in is cheap — the user just keeps talking and
+        # the agent yields — so bias toward responding sooner. Defaults 0.5/6.0.
+        min_endpointing_delay=float(os.getenv("MIN_ENDPOINTING_DELAY", "0.2")),
+        max_endpointing_delay=float(os.getenv("MAX_ENDPOINTING_DELAY", "3.0")),
     )
 
     await session.start(agent=Assistant(), room=ctx.room)
