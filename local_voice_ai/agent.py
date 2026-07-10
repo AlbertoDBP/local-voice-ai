@@ -158,14 +158,28 @@ async def my_agent(ctx: JobContext) -> None:
     tts_voice = os.getenv("TTS_VOICE", "af_nova")
     tts_api_key = os.getenv("TTS_API_KEY", "no-key-needed")
 
+    # AGENT_MODE=victoria points the LLM slot at the local Victoria bridge
+    # (headless Claude, vault-scoped tools, real turn detection via LiveKit)
+    # instead of Ollama/llama.cpp. Additive, not a replacement: default mode
+    # is unchanged (the qwen2.5 vault agent), switch via .env.local + restart,
+    # same pattern as every other config toggle in this repo.
+    agent_mode = os.getenv("AGENT_MODE", "vault").lower()
+    if agent_mode == "victoria":
+        llama_base_url = os.getenv("VICTORIA_BRIDGE_URL", "http://127.0.0.1:8801/v1")
+        llama_model = os.getenv("VICTORIA_MODEL", "claude-sonnet-5")
+        llama_api_key = "no-key-needed"
+
     logger.info(
-        "agent session: stt=%s/%s llm=%s/%s tts=%s",
-        stt_provider, stt_model, llama_base_url, llama_model, tts_base_url,
+        "agent session: mode=%s stt=%s/%s llm=%s/%s tts=%s",
+        agent_mode, stt_provider, stt_model, llama_base_url, llama_model, tts_base_url,
     )
+
+    llm_extra_kwargs = {"extra_headers": {"X-Room-Name": ctx.room.name}} if agent_mode == "victoria" else {}
 
     session = AgentSession(
         stt=openai.STT(base_url=stt_base_url, model=stt_model, api_key=stt_api_key),
-        llm=openai.LLM(base_url=llama_base_url, model=llama_model, api_key=llama_api_key),
+        llm=openai.LLM(base_url=llama_base_url, model=llama_model, api_key=llama_api_key,
+                       **llm_extra_kwargs),
         # The model name selects the wire protocol the openai TTS plugin uses:
         # only {"tts-1", "tts-1-hd"} use the raw-audio-bytes stream that the
         # Kokoro server speaks. Any other name (e.g. "kokoro") routes the plugin
@@ -187,6 +201,12 @@ async def my_agent(ctx: JobContext) -> None:
 
     await session.start(agent=Assistant(), room=ctx.room)
     await ctx.connect()
+
+    if agent_mode == "victoria":
+        # say() speaks directly (no LLM round trip) so this is instant —
+        # unlike a real reply, which pays the full claude -p latency. Signals
+        # the room is actually live before Alberto starts talking to silence.
+        session.say("Victoria here — go ahead.")
 
 
 if __name__ == "__main__":

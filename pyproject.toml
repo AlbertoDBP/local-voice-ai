@@ -26,6 +26,9 @@ dependencies = [
     "numpy",
     "soundfile",
     "python-multipart",
+
+    # Victoria bridge: vault-scoped MCP server (mcp) + headless Claude driver
+    "mcp",
 ]
 
 [project.optional-dependencies]

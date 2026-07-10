@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "vault": {
+      "command": "/Volumes/CH-DataOne/AlbertoDBP/Second-Brain-Master/local-voice-ai/.venv/bin/python",
+      "args": ["-m", "local_voice_ai.vault_mcp_server"],
+      "cwd": "/Volumes/CH-DataOne/AlbertoDBP/Second-Brain-Master/local-voice-ai"
+    }
+  }
+}
